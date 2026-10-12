@@ -169,6 +169,29 @@ def check_sim():
     return out, fails
 
 
+def check_links():
+    """Every relative link in the documents resolves to a file that is here.
+
+    A link to a document that is not in this directory is the failure mode of
+    a repository assembled out of a larger one: it reads correctly to whoever
+    wrote it and is a dead end for everyone else."""
+    out, bad, n = [], [], 0
+    for doc in ("README.md", "PROTOCOL.md"):
+        if not os.path.exists(doc):
+            continue
+        for m in re.finditer(r"\[[^\]]+\]\(([^)\s]+)\)", open(doc).read()):
+            target = m.group(1).split("#")[0]
+            if not target or target.startswith(("http://", "https://",
+                                                "mailto:")):
+                continue
+            n += 1
+            if not os.path.exists(target):
+                bad.append(f"{doc} links to {target}, which is not here")
+    out.append(f"   {n} relative link(s), all resolving"
+               if not bad else f"   {n} relative link(s) checked")
+    return out, bad
+
+
 def main():
     fails = []
     for n, (title, fn) in enumerate((
@@ -176,6 +199,7 @@ def main():
              check_bas_identical),
             ("the version lives in one place on each side", check_version),
             ("the docs match the options", check_docs),
+            ("the documents link only to files that are here", check_links),
             ("the simulator runs end to end", check_sim)), 1):
         out, bad = fn()
         print(f"{n}. {title}")
