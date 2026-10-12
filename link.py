@@ -168,7 +168,13 @@ class SimLink:
                      "AFAN:INP": "FM Demod", "MEAS:AFR:SEL": "Distn",
                      "AFAN:FILT1": "20Hz HPF", "AFAN:FILT2": "15kHz LPF",
                      "AFAN:DEMP": "Off", "AFAN:DET": "RMS",
-                     "AFAN:RANG": "Auto", "AFAN:AIN": "Float"}
+                     "AFAN:RANG": "Auto", "AFAN:AIN": "Float",
+                     # The RF ANALYZER screen. Seeded with values that are
+                     # wrong for either mode, so that applying and reading
+                     # them back is a real test rather than a coincidence.
+                     "RFAN:INP": "Ant", "RFAN:SQU": "Open",
+                     "RFAN:ATT": "20 dB", "RFAN:ATT:MODE": "Auto",
+                     "RFAN:IFBW": "30 KHZ", "RFAN:SENS": "Normal"}
 
     def set_xonxoff(self, on):
         pass

@@ -155,10 +155,66 @@ a default. `--help` on either program has the rest.
 | `--max-level` | `-30` | the generator is never set above this |
 | `--no-setup` | — | skip `SETUP`, leaving the generator and audio chain as the last user left them |
 
+**Analyser options.** `--af-input` decides what is being measured, and the RF
+ANALYZER defaults follow from it:
+
+| Option | `--af-input "FM Demod"` | otherwise (the default) |
+|---|---|---|
+| `--af-input` | the 8935's own receiver is the DUT | `Audio In`: a radio is |
+| `--rfan-input` | `Ant` | `RF In` |
+| `--rfan-squelch` | `Open` | `Fixed` |
+| `--rfan-atten` | `0 dB` | *(not sent — `Auto` chooses it)* |
+| `--rfan-atten-mode` | `Hold` | `Auto` |
+| `--rfan-ifbw` | *(not sent)* | *(not sent)* |
+| `--rfan-sens` | *(not sent)* | *(not sent)* |
+
+**Both columns are applied on every run**, rather than the run remembering
+what it found and putting it back. A restore does not happen after a crash, a
+Ctrl-C or a serial timeout, and what was found may itself have been left by an
+abandoned run; applying a named state is deterministic, and that is what makes
+two runs comparable. Naming any of the analyser options above pins that value
+for both modes. Everything that is sent is read back and a mismatch is reported,
+because on this instrument `OK SCPI 0` means only that nothing was rejected.
+
 **`--start` means two different things**, which is worth knowing before you
 mistype it: on `load.py` it means "do not load, run the stored copy"; on
 `sinad.py measure` it is the top of the sweep in dBm. They are kept from
 sharing an internal name for that reason.
+
+### Measuring the 8935's own receiver
+
+A loopback is the chain check: it exercises generator, analyser, demodulator,
+audio chain and fit end to end with no radio involved. Coax from **DUPLEX OUT
+to ANT IN**, then one command:
+
+```
+python3 sinad.py measure --af-input "FM Demod" --freq 145.55
+```
+
+That is the whole procedure. No audio cable is needed — the demodulator feeds
+the analyser internally — and nothing has to be typed into `term` first.
+
+Two of the settings it applies are measurement traps rather than preferences,
+and are worth understanding even though you do not have to act on them:
+
+- **Squelch must be `Open`.** With squelch active the audio mutes as the
+  signal weakens, so the curve measures where the squelch closes rather than
+  where the receiver gives up: SINAD collapses for a reason that has nothing
+  to do with the receiver, and the 12 dB point is meaningless.
+- **Input attenuation must be held at `0 dB`.** It sits directly in the
+  measured path, and `Auto` costs 6.3 dB — measured: one fixture read 12 dB
+  SINAD at −101.04 dBm on `Auto` against −107.35 / −107.17 / −107.32 dBm
+  across three runs at `0 dB`/`Hold`. Autoranging ranges up for the strong
+  start of a sweep and does not come back down, so a sensitivity figure taken
+  on `Auto` is simply wrong — and silently, since nothing about the curve
+  looks odd.
+
+The analyser's **frequency** needs nothing: the instrument sets `RFAN:FREQ`
+alongside `RFG:FREQ` whenever the frequency is set, so the analyser already
+follows the generator.
+
+Expect a number unlike a handheld's. The 8935's receiver is a broadband
+test-set front end, so its own 12 dB point sits well above a decent radio's.
 
 ### Two options worth reading twice
 

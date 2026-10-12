@@ -24,7 +24,7 @@ Protocol, reply grammar and timing: PROTOCOL.md.
 import argparse, math, sys, threading, time
 
 from link import (PROG, connection_args, converse, open_link, probe_state,
-                  require_state, shutdown)
+                  require_state, scpi_query, shutdown)
 
 # What SINADCTL's phase codes mean, so the stream reads as phases rather than
 # as a wall of points.
@@ -43,6 +43,74 @@ PHASE_NOTE = {
 def uv(dbm):
     """dBm into 50 ohms as microvolts PD - how receiver sensitivity is quoted."""
     return math.sqrt(10 ** (dbm / 10) * .05) * 1e6
+
+
+# The RF ANALYZER screen, as settings rather than as instructions to type by
+# hand. These matter only when the AF analyser is listening to the 8935's own
+# demodulator (--af-input 'FM Demod'), because then the 8935's receiver is the
+# device under test; with a radio on AUDIO IN the analyser is not in the
+# measurement path at all. So the defaults follow --af-input, and each has a
+# flag for the case where they should not.
+#
+# BOTH columns are applied, on every run. "Restoring" by remembering what was
+# found and putting it back cannot be relied on: it does not happen after a
+# crash, a Ctrl-C or a serial timeout, and what was found may itself have been
+# left behind by an abandoned run. Applying a named state unconditionally is
+# deterministic, and that is what makes two runs comparable.
+#
+# A None in either column means "do not send this one". For the attenuator
+# that is deliberate rather than an omission: in Auto the instrument chooses
+# the value itself and one sent alongside is overridden (reference p303).
+RF_ANALYSER = [
+    # dest, SCPI root, 'FM Demod' value, other value
+    # Which socket the analyser listens on. The generator is on DUPLEX OUT,
+    # so a loopback measurement needs the analyser on the other connector.
+    ("rfan_input", "RFAN:INP", "Ant", "RF In"),
+    # Not a matter of taste: with squelch active the audio mutes as the signal
+    # weakens, so the curve measures where the squelch closes rather than
+    # where the receiver gives up. 'Open' is the only setting that measures
+    # the receiver.
+    ("rfan_squelch", "RFAN:SQU", "Open", "Fixed"),
+    # Input attenuation sits directly in the measured path and is worth 6.3 dB,
+    # measured: one fixture read 12 dB SINAD at -101.04 dBm on 'Auto' against
+    # -107.35 / -107.17 / -107.32 dBm across three runs at '0 dB'/'Hold'.
+    # Autoranging evidently ranges up for the strong start of a sweep and does
+    # not come back down, so a sensitivity figure taken on Auto is simply
+    # wrong - and silently, since nothing about the curve looks odd.
+    ("rfan_atten", "RFAN:ATT", "0 dB", None),
+    ("rfan_atten_mode", "RFAN:ATT:MODE", "Hold", "Auto"),
+    # No default in either mode: the documented choices are '15 kHz' and
+    # '230 kHz' (reference p302), but this unit rejects '15 kHz' and reports
+    # its own filter as 30 KHZ, so the list differs between units of the
+    # family and any default would fail on some. 30 kHz is right for
+    # 5 kHz-deviation FM in any case.
+    ("rfan_ifbw", "RFAN:IFBW", None, None),
+    # No default either, for a different reason: 'High' changes the front end
+    # and so moves the whole curve, but by an amount that is not resolved -
+    # it moved the 12 dB point by 0.38 dB against a run-to-run repeatability
+    # of 0.22 dB. How much input protection to give up is the operator's
+    # call, so there is an option and no default.
+    ("rfan_sens", "RFAN:SENS", None, None),
+]
+
+
+def _is_loopback(a):
+    """True when the AF analyser is listening to the 8935's own demodulator."""
+    return "DEMOD" in (getattr(a, "af_input", "") or "").upper()
+
+
+def analyser_settings(a):
+    """The RF ANALYZER settings this run will apply, as (root, value) pairs."""
+    out = []
+    loopback = _is_loopback(a)
+    for dest, root, on_demod, otherwise in RF_ANALYSER:
+        val = getattr(a, dest, None)
+        if val is None:
+            val = on_demod if loopback else otherwise
+            setattr(a, dest, val)
+        if val:
+            out.append((root, val))
+    return out
 
 
 def configure(link, a):
@@ -66,6 +134,34 @@ def configure(link, a):
             print("  SETUP reported instrument errors (the WARN lines above "
                   "carry them).")
             print("  A measurement taken now is in a state nobody checked.")
+
+    # AFAN:INP goes AFTER SETUP, never before: SETUP sets 'Audio In' itself,
+    # so a value applied first is silently undone - and MEAS:AFR:FM? then
+    # answers empty, because with Audio In selected there is no demodulator in
+    # the path.
+    settings = [("AFAN:INP", a.af_input)] + analyser_settings(a)
+    for root, val in settings:
+        converse(link, f"SCPI {root} '{val}'")
+
+    # Read back every one of them. `OK SCPI 0` means only that nothing was
+    # rejected: this instrument accepts some commands silently and ignores
+    # them, with no error and nothing in the error queue, so a readback is the
+    # only evidence a setting took.
+    bad = []
+    for root, val in settings:
+        got, problem = scpi_query(link, f"{root}?")
+        if got is None:
+            bad.append(f"{root} could not be read: {problem}")
+        elif got.strip().strip("'\"").upper() != val.strip().upper():
+            bad.append(f"{root} is {got.strip()!r}, asked for {val!r}")
+    print("  analyser: " + "  ".join(f"{r.lower()} {v}"
+                                     for r, v in settings))
+    for line in bad:
+        print(f"  WARNING {line}")
+    if bad:
+        print("  Those are fields the instrument did not end up in. Check the "
+              "AF ANALYZER and\n  RF ANALYZER screens before trusting the "
+              "result.")
 
 
 def cmd_ping(a):
@@ -284,6 +380,40 @@ def build_parser():
                    help="do not send SETUP first (then the tone, deviation, "
                         "output port and the whole audio chain are whatever "
                         "the last user left)")
+
+    n = sp.add_argument_group("analyser")
+    n.add_argument("--af-input", dest="af_input", default="Audio In",
+                   help="where the AF analyser listens: 'Audio In' for a "
+                        "radio's audio, 'FM Demod' to measure the 8935's own "
+                        "receiver with no audio cable. The RF ANALYZER "
+                        "defaults below follow this")
+    n.add_argument("--rfan-input", default=None,
+                   help="which socket the analyser listens on: Ant / RF In. "
+                        "Default Ant for 'FM Demod', RF In otherwise")
+    n.add_argument("--rfan-squelch", default=None,
+                   help="Open / Fixed / Pot. Default Open for 'FM Demod', "
+                        "Fixed otherwise. Open is the only setting that "
+                        "measures the receiver rather than where its squelch "
+                        "closes")
+    n.add_argument("--rfan-atten", default=None,
+                   help="input attenuation, 0 to 35 dB in 5 dB steps. "
+                        "Default '0 dB' for 'FM Demod' and unset otherwise, "
+                        "since Auto chooses it")
+    n.add_argument("--rfan-atten-mode", default=None,
+                   help="Hold / Auto. Default Hold for 'FM Demod' - "
+                        "autoranging moves the 12 dB point by 6.3 dB, "
+                        "measured - and Auto otherwise")
+    n.add_argument("--rfan-sens", default=None,
+                   help="front-end sensitivity: Normal / High. NOT SENT "
+                        "unless given - High moves the whole curve, but by "
+                        "0.38 dB against a 0.22 dB run-to-run spread, so how "
+                        "much input protection to give up is your call")
+    n.add_argument("--rfan-ifbw", default=None,
+                   help="IF bandwidth. NOT SENT unless given: the documented "
+                        "choices are '15 kHz' and '230 kHz' but this unit "
+                        "rejects '15 kHz' and reports 30 KHZ, so the list "
+                        "differs between units. Read the IF Filter field "
+                        "before setting it")
     g.add_argument("--max-time", type=float, default=900.0,
                    help="seconds to wait for the sweep to finish")
     sp.set_defaults(func=cmd_measure)
