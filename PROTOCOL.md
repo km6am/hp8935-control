@@ -1,32 +1,22 @@
 # Serial protocol reference — SINADCTL on an HP 8935
 
-> **This is the copy that ships with `minimal/`.** The canonical version is
-> `../PROTOCOL.md` in the parent directory; this one is the same document with
-> the references to the full tool's features removed, so that a lifted-out
-> `minimal/` is complete on its own. If the two ever disagree, the parent is
-> right. The *protocol* itself is identical either way, because `minimal/`
-> ships a byte-identical copy of `SINADCTL.BAS`.
-
 **Audience: somebody writing their own controller.** Everything needed to drive
-`SINADCTL` over RS-232 without reading any of the Python here. If you want to
-*use* the two programs in this folder rather than replace them, read
-[`README.md`](README.md); for the bench history behind a claim here, the
-parent directory's `CLAUDE.md` is the lab notebook.
+`SINADCTL` over RS-232 without reading any of the Python here. To *use* the two
+programs in this repository rather than replace them, read
+[`README.md`](README.md).
 
-**Provenance of everything below.** The command set, the argument forms and the
-reply grammar are read off `SINADCTL.BAS`'s own dispatch (`Parse`, `SELECT W$`)
-and its emitting lines — not from prose, not from memory, and in two places
-they disagree with the parent's `README.md`, which is noted where it happens.
-Behaviour of
-the *instrument* traces to the *Agilent 8935 Series E6380A GPIB Syntax
-Reference*, E6380-90073 Rev E (`9018-70126.pdf`, cited by its own page
-numbers), or to bench measurement on **one** unit, marked *measured*. Timing
-figures marked *measured* come from logged run timestamps. §13 lists what could
-not be established at all.
+**Provenance.** The command set, the argument forms and the reply grammar are
+read off `SINADCTL.BAS`'s own dispatch (`Parse`, `SELECT W$`) and its emitting
+lines, so the program itself is the authority for them. Behaviour of the
+*instrument* traces either to the *Agilent 8935 Series E6380A GPIB Syntax
+Reference*, E6380-90073 Rev E (cited by its own page numbers), or to bench
+measurement on **one** unit, marked *measured*. Timing figures marked
+*measured* come from logged run timestamps. §13 lists what could not be
+established at all.
 
-This describes **SINADCTL 2.3**. The program announces its version in two
-places and they now come from one literal; §12 says why that is worth a
-paragraph.
+This describes **SINADCTL 2.3**, which announces its version in the startup
+line and in its answer to `PING`, both from one literal; §12 says why that is
+worth a paragraph.
 
 ---
 
@@ -183,8 +173,8 @@ Three details that bite:
 ## 3. The state machine
 
 Nothing on the 8935 announces where your typed characters are going, and
-nothing resets on its own. There are four states. The names are the ones the
-existing tooling prints, so they are worth keeping.
+nothing resets on its own. There are four states; these are the names
+`link.py` prints for them.
 
 | State | Serial In | What your bytes do | Needed for |
 |---|---|---|---|
@@ -385,12 +375,16 @@ fewer points than `(hi−lo)/step`.
 Both answer `ERR SCPI NEEDS A COMMAND` / `ERR SCPIQ NEEDS A QUERY` with no
 argument.
 
-> **The parent's `README.md` also lists `AFSEL` and `AFSTR`.** Those commands **do not
-> exist** in 2.3. They were removed once `MEAS:AFR:ACL?` turned out to be an
-> always-live field rather than one of the `MEAS:AFR:SEL` choices, so nothing
-> ever needed to switch the analyser. That README's serial-command list and
-> the protocol paragraph in `CLAUDE.md` are both stale on this point; the
-> dispatch is the authority.
+> **There is no command to select the AF level measurement, and none is
+> needed.** `MEAS:AFR:ACL?` (reference p211) reads the AC Level field, which
+> is **always live** while `AFAN:INP` is `'Audio In'`, `'Audio Out'`,
+> `'Ext Mod'` or `'SSB Demod'`. AC Level is **not** one of the
+> `MEAS:AFR:SEL` choices — p216 accepts only `'SINAD' 'Distn' 'SNR'
+> 'AF Freq' 'DC Level'` — so reading it does not disturb the SINAD selection,
+> and `AFLVL` can be polled as often as you like during a SINAD measurement.
+> *Measured on this unit:* it answers in volts
+> (`MEAS:AFR:ACL:UNits?` → `V`), and it only answers once `SETUP` has run —
+> querying AC Level while `AF Anl In` was something else hung the program.
 
 ---
 
@@ -622,14 +616,11 @@ see §8.
 ←  OK RF OFF
 ```
 
-Step 7's figures are from a real run
-recorded by the full tool in the parent directory, which is why the levels are
-so high: that radio was being measured through a radiating coupling path at an
-RF-noisy site. Step 6's voltage is from the same run; the spread digit beside
-it is illustrative, since the per-reading spread was not kept. Everything else
-in the transcript is the format, not data. (Step 6 is also not something the
-programs in this folder do — the volume step is one of the things `minimal/`
-leaves out — but `AFLVL` is a real command and `sinad.py term` can send it.)
+Step 7's figures are from a real measurement, which is why the levels are so
+high: that radio was being measured through a radiating coupling path at an
+RF-noisy site, and tens of dB of that path loss are in the numbers. Step 6's
+voltage is real too; the spread digit beside it is illustrative. Everything
+else in the transcript is the format, not data.
 
 **Minimum viable client**, in outline:
 
@@ -854,8 +845,8 @@ reply that was coming — and an abandoned reply then poisons the *next* read
 
 ### Measured run times
 
-*Measured* across 38 real-radio runs, from the timestamps the full tool
-records with each point (the programs here print the points and keep no file):
+*Measured* across 38 runs against real radios, from a timestamp taken as each
+point arrived:
 
 | | |
 |---|---|
@@ -885,8 +876,8 @@ would return stale data while appearing fresh.
 
 ## 10. Error-queue discipline on bus 800
 
-This is where a whole bench day went, so it is worth understanding before you
-write any readback code.
+Read this before writing any readback code. The failure it describes is
+silent, and it reports plausible wrong answers rather than errors.
 
 **Every `SCPIQ` is two bus transactions**: the query, then `SYST:ERR?`. Any read
 that times out leaves its request unanswered on the bus. That answer then comes
@@ -899,18 +890,17 @@ Four rules follow, all *measured*:
    status byte, **not the output queue**. That needs a **device clear** — HP
    BASIC's `CLEAR 800`, which is accepted on this unit. An orphaned response
    survives `*CLS`, survives `QUIT`, and survives reloading the program.
-   *Measured:* a stale `"30 KHZ"` left from one session's `RFAN:IFBW?` came
-   back in the *next* session as a reported instrument error.
+   *Measured:* an answer orphaned by one session's `RFAN:IFBW?` was still
+   there in the next session, where it was read as that session's answer.
 2. **Never drain by reading.** Reading a bus with nothing to send provokes
    `-420 Query UNTERMINATED`, which the 8935 *displays* — so a pre-query drain
-   announces itself on the instrument's screen on every single query. The
-   routine that did this was deleted in favour of a device clear, which
-   provokes nothing.
+   announces itself on the instrument's screen on every single query. A device
+   clear does the same job and provokes nothing.
 3. **Discard your own buffer before each query.** Anything already buffered on
-   your side is the tail of a query you gave up on. Reading it as this query's
-   answer is exactly what made each abandoned query poison its successor — and
-   because the old retry re-sent rather than discarded, **the lag grew**: 1, 1,
-   2, 2, 3…
+   your side is the tail of a query you gave up on, and reading it as this
+   query's answer makes each abandoned query poison its successor. A retry
+   that re-sends without discarding first makes it worse rather than better:
+   **the lag grows** rather than clearing.
 4. **Check the echo, retry once.** With the echo (§2) a slipped answer is
    visible rather than silent, and reading it puts the queue back in step, so
    asking again recovers at the cost of one query.
@@ -925,8 +915,8 @@ when it does:
 | `SCPIQ` answer times out | device clear + `*CLS`, then replies with an empty answer field | `SCPIQ,<echo>,` |
 | real instrument errors | reports up to 3 records | `WARN <record>` each, then `SCPIE,…` |
 
-A device clear is also issued at startup, which is why the first readback of a
-session is clean where every earlier attempt produced fragments.
+The program also issues a device clear at startup, so a response orphaned by
+a previous session is gone before the first query of this one.
 
 **One exception to reporting:** `RFLIM` deliberately asks for levels it expects
 to be refused, so each rejection puts a `-200 Execution error` in the queue.
@@ -938,8 +928,7 @@ without reporting them for the duration of the probe. Do not be surprised by
 
 ## 11. SCPI rules that actually apply on this instrument
 
-Four rules matter more than any individual command, and all four were worked
-out the hard way.
+Four rules matter more than any individual command.
 
 ### The screen must be displayed — for readings, not for settings (p205)
 
@@ -1009,8 +998,8 @@ is not one of that field's choices** — nothing to do with screens or menus.
 
 *Measured:* `RFAN:IFBW '15 kHz'` is **rejected**, and the same instrument
 answers `RFAN:IFBW?` with `"30 KHZ"`. The command dictionary lists only
-`'15 kHz'` and `'230 kHz'` for that field. `9018-70126.pdf` covers a family and
-the IF filter is one place this unit differs.
+`'15 kHz'` and `'230 kHz'` for that field. E6380-90073 covers a family of test
+sets, and the IF filter is one place this unit differs from it.
 
 **Treat the instrument's own readback as the authority and the manual as a
 starting point.** Read the choice list off the front-panel field before setting
@@ -1044,12 +1033,13 @@ through 2.2 the startup line said `OK SINADCTL 2.2 READY` while `PING`
 answered `OK SINADCTL 1.9` — the same build, two strings, because the `PING`
 literal was never updated. A client comparing the `PING` version against an
 expected one therefore reported "the instrument is running an older build;
-reload it" on *every* command of a correctly loaded program, which is how you
-train people to ignore the message that matters.
+reload it" on *every* command of a correctly loaded program — a warning that
+is worse than no warning, because it trains the reader to ignore the real
+one.
 
-Fixed in **2.3**: one `Ver$`, sent in both lines, and `check_bas.py` now fails
-if a second version literal appears anywhere in the program. Two things follow
-for a client:
+Fixed in **2.3**: one `Ver$` assignment, sent in both lines. `check_minimal.py`
+fails if a second version literal appears anywhere in the program, or if the
+Python's own constant disagrees with it. Two things follow for a client:
 
 - **Read the version out of whichever line the program sent**, and hold it in
   one place of your own. Never write a second copy of the number.
@@ -1088,29 +1078,29 @@ serial 9, the link you are driving it over.
 
 ---
 
-## 13. What could not be established from the repo
+## 13. What is not established
 
 Stated here rather than guessed at anywhere above.
 
 - **Whether `ENTER 9` tolerates a line longer than 80 characters**, or how it
-  fails. The limit is inferred from the program's `DIM` statements and from one
-  bench incident where concurrent access produced a string overflow that killed
-  the program. The *consequence* of overflow is therefore known to be bad; the
-  exact boundary behaviour is not.
+  fails. The limit is inferred from the program's `DIM` statements, and a
+  string overflow has been observed killing the running program when two
+  processes wrote to the port at once. So the *consequence* of overflow is
+  known to be bad; the exact boundary behaviour is not.
 - **Whether the reply stream can be read reliably while a command is being
-  sent.** Nothing in the repo does this, and the program only reads serial in
-  its idle loop, so a client should treat the link as strictly
-  request/response.
+  sent.** Neither program here does it, and SINADCTL only reads serial in its
+  idle loop, so a client should treat the link as strictly request/response.
 - **Whether quoted strings are matched case-sensitively** on bus 800. Matching
   the manual is correct either way, but the reason the old wrong-case strings
   failed was never isolated.
 - **Whether `AFG1:DEST 'FM'` and `AFG2:DEST 'FM'` can be set simultaneously**
   (tone plus PL together). Both fields exist independently on the screen, which
   makes it plausible; the manual does not say.
-- **`*CLS` itself is not in `9018-70126.pdf`** — that manual does not cover
+- **`*CLS` itself is not in E6380-90073** — that manual does not cover
   IEEE 488.2 common commands. Its behaviour here is unverified but not
   contradicted; its *inability* to clear the output queue is from the IEEE
-  standard and was confirmed on the bench by a stale response surviving it.
+  standard, and was confirmed by measurement when a stale response survived
+  it.
 - **Over-range behaviour of `MEAS:AFR:ACL?`** (a silently pegged number is the
   dangerous case), and whether the instrument's own averaging is enabled
   (`MEAS:AFR:SINAD:AVER:STAT?`). If it is, the per-point `sd` understates the
@@ -1120,7 +1110,7 @@ Stated here rather than guessed at anywhere above.
   loop.
 - **Whether an `ON KEY` branch is serviced from inside the `WAIT .1` loop** in
   the climb-to-cap prompt. The five USER softkeys themselves are confirmed on
-  hardware (2026-10-11), serviced from the main idle loop; the front-panel
+  hardware, serviced from the main idle loop; the front-panel
   **numeric keypad** is measured *unreachable* from IBASIC and is not an input
   path at all.
 - **The serial connector's DTE/DCE pinout.**
@@ -1128,9 +1118,6 @@ Stated here rather than guessed at anywhere above.
 
 ---
 
-How to use the two programs in this folder is in [`README.md`](README.md).
-Operator-facing material — cabling, front-panel setup, what the measurement
-means, desense, troubleshooting — plus the bench history behind every
-*measured* claim here, is in the parent directory: `OPERATING.md`,
-`CLAUDE.md`, and `MANUAL_VERIFICATION.md` for the command-by-command check
-against the GPIB reference.
+How to use the two programs that implement this is in
+[`README.md`](README.md): cabling, the front-panel setup the link depends on,
+the options, and what the measurement means.

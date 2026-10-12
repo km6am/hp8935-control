@@ -1,54 +1,63 @@
 #!/usr/bin/env python3
-"""Checks for the minimal fork. Run it after touching anything in here.
+"""Checks that need no instrument. Run it after changing anything here.
 
   python3 check_minimal.py
 
 Four checks, in the order they would catch a problem:
 
-  1. The two .BAS files are byte-identical to the parent directory's. They are
-     COPIES, not forks: the program that runs on the 8935 must be the same one
-     the full tool loads, or a bug fixed in one place persists in the other
-     and the version numbers stop meaning anything. Skipped with a note when
-     the parent is not there, i.e. when this folder has been lifted out.
-  2. link.PROG_VERSION matches the Ver$ in SINADCTL.BAS. The laptop names a
-     version in exactly one place and the program in exactly one place; this
-     is what keeps them from drifting. In SINADCTL 2.0-2.2 the PING case
-     carried its own stale literal, so a correctly loaded program asked to be
-     reloaded on every run - which teaches people to ignore the message that
-     matters.
-  3. Every --flag named in README.md or PROTOCOL.md exists, and every example
-     command line in them parses. The parent's check_docs.py does this for the
-     parent; the fork has its own options and its own docs, so it needs its
-     own.
+  1. SINADCTL.BAS and SERLOAD.BAS byte-compared against reference copies one
+     directory up, when any are there. An integrity check for a checkout that
+     has them; with none present it says so and moves on, and the other three
+     checks still run.
+  2. link.PROG_VERSION matches the Ver$ literal in SINADCTL.BAS, and no
+     second version literal exists anywhere in the program. The version in
+     the READY line is the only way to tell from the laptop that a load
+     actually took, so each side names it in exactly one place. Releases
+     2.0-2.2 carried two copies of the number, they drifted, and a correctly
+     loaded program then asked to be reloaded on every run.
+  3. Every option named in README.md or PROTOCOL.md exists, and every example
+     command line in them parses. Those documents have no other way of being
+     told they have gone stale.
   4. The simulator smoke tests: load.py --sim and sinad.py measure --sim run
-     to completion. These are the only end-to-end tests that exist here,
-     because nobody may open the serial port.
+     to completion. These are the only end-to-end tests here, since the real
+     ones need an instrument.
 """
 import os, re, shlex, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-PARENT = os.path.dirname(HERE)
+ABOVE = os.path.dirname(HERE)   # where a reference copy may sit
 BAS = ("SINADCTL.BAS", "SERLOAD.BAS")
 DOCS = ("README.md", "PROTOCOL.md")
 PY = sys.executable
 
 
 def check_bas_identical():
-    out, fails = [], []
+    """Compare the two .BAS files with reference copies one directory up.
+
+    Absence of a reference copy is not a failure: a standalone checkout has
+    none, and the files here are the originals as far as it is concerned. It
+    is reported rather than passed over silently, so that a checkout which was
+    MEANT to have one does not quietly stop being checked."""
+    out, fails, found = [], [], 0
     for name in BAS:
         mine = os.path.join(HERE, name)
-        theirs = os.path.join(PARENT, name)
-        if not os.path.exists(theirs):
-            out.append(f"   {name}: parent copy not present, skipped "
-                       f"(lifted-out folder)")
+        if not os.path.exists(mine):
+            fails.append(f"{name} is missing")
             continue
-        a, b = open(mine, "rb").read(), open(theirs, "rb").read()
+        ref = os.path.join(ABOVE, name)
+        if not os.path.exists(ref):
+            continue
+        found += 1
+        a, b = open(mine, "rb").read(), open(ref, "rb").read()
         if a == b:
-            out.append(f"   {name}: identical to ../{name} ({len(a)} bytes)")
+            out.append(f"   {name}: identical to the copy above "
+                       f"({len(a)} bytes)")
         else:
-            fails.append(f"{name} has drifted from ../{name} - it must be a "
-                         f"byte-identical copy. Fix with:  cp ../{name} "
-                         f"{name}")
+            fails.append(f"{name} differs from the copy one directory up; "
+                         f"they are meant to be byte-identical")
+    if not found:
+        out.append("   no reference copies one directory up: nothing to "
+                   "compare, skipped")
     return out, fails
 
 
@@ -130,9 +139,21 @@ def check_docs():
 
 
 def check_sim():
+    """Run each program against the simulator and look for its headline line.
+
+    The load goes at --stream-delay 0 rather than the default 0.08. Two
+    reasons. The delay is a hardware timing constant - the 8935's command bar
+    drops characters at full line rate - and a simulator cannot say anything
+    about whether its value is right, so running the default proves nothing.
+    And at 0.08 a 732-line stream takes a minute, during which the simulator
+    applies SERLOAD's real rule that five seconds of silence ends the stream:
+    on a loaded machine the scheduler can produce that gap, the stream is
+    reported short, and the check fails for a reason that has nothing to do
+    with the code. (That the failure is *reported* rather than silently
+    stored is the loader behaving correctly; see load.py.)"""
     out, fails = [], []
     for args, want in (
-            (["load.py", "--sim"], "READY"),
+            (["load.py", "--sim", "--stream-delay", "0"], "READY"),
             (["sinad.py", "measure", "--sim"], "dB SINAD at"),
             (["sinad.py", "ping", "--sim"], "SINADCTL running")):
         r = subprocess.run([PY] + args, cwd=HERE, capture_output=True,
@@ -151,7 +172,7 @@ def check_sim():
 def main():
     fails = []
     for n, (title, fn) in enumerate((
-            ("the .BAS copies are byte-identical to the parent's",
+            ("the IBASIC sources match any reference copy",
              check_bas_identical),
             ("the version lives in one place on each side", check_version),
             ("the docs match the options", check_docs),
@@ -167,7 +188,7 @@ def main():
         for f in fails:
             print(f"  - {f}")
         return 1
-    print("minimal/ is consistent with itself and with the parent.")
+    print("All checks passed.")
     return 0
 
 

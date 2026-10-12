@@ -74,7 +74,7 @@ def cmd_ping(a):
     this is the command you run precisely when you do not know the state."""
     link = open_link(a, assume_running=True)
     # probe_state prints the state and, for a running program, compares the
-    # version in its reply against this fork's
+    # version in its reply against PROG_VERSION
     state = probe_state(link, a)
     if state != PROG:
         print("  SINADCTL is not answering. See README.md, 'Three things that")

@@ -5,15 +5,15 @@ Shared by load.py (which needs the IBASIC command bar) and sinad.py (which
 needs the SINADCTL program running). Nothing else is shared, which is why
 this is the only module both import.
 
-This is a deliberate fork of the parent directory's hp8935.py, trimmed to what
-the two minimal programs use. The parent is the one that gets new features;
-see README.md.
+Everything here is either the link itself or a way of finding out what state
+the instrument is in, because nothing on the 8935 announces that and nothing
+resets it.
 """
 import argparse, math, re, statistics, sys, time
 
-# The protocol version this fork expects. SINADCTL announces its own version
-# in the READY line and in its answer to PING, both from one Ver$ literal -
-# see check_version() for why that matters.
+# The SINADCTL version this module expects, named here and nowhere else.
+# SINADCTL announces its own version in the READY line and in its answer to
+# PING, both from one Ver$ literal - see check_version() for why that matters.
 PROG_VERSION = "2.3"
 
 # ---------------------------------------------------------------- state ----
@@ -138,9 +138,10 @@ class SimLink:
     RUN emulates SERLOAD or SINADCTL.
 
     The measurement model is INVENTED - 12 dB SINAD near -119 dBm with
-    Gaussian reading noise. It exists so the protocol can be exercised with no
-    instrument attached, which is the only way this fork can be tested at all:
-    nobody may open the serial port here. It is not a model of any radio.
+    Gaussian reading noise. It exists so that the protocol, the loader and the
+    measurement flow can be exercised with no instrument attached, which is
+    also the only way any of this can be tested automatically. It is not a
+    model of any radio and no number it produces means anything.
     """
 
     def __init__(self, line_time=0.01):
@@ -361,7 +362,7 @@ class SimLink:
             self._emit("OK BYE")
             self.mode = "inst"
         elif w in REAL_COMMANDS:
-            # a real command this trimmed simulator does not model. Say so,
+            # a real command this simulator does not model. Say so,
             # rather than answering ERR UNKNOWN and implying the instrument
             # would reject it.
             self._emit(f"ERR SIM UNMODELLED {w}")
@@ -572,14 +573,15 @@ def clear_bar(link, a, n=120):
 
 
 def check_version(reply, announce=True):
-    """Compare the version in a READY or PING reply with this fork's.
+    """Compare the version in a READY or PING reply with PROG_VERSION.
 
-    Read it from whatever line the program sent, never from a second literal
-    of our own: in SINADCTL 2.0-2.2 the PING case carried its own "1.9" while
-    READY carried the real version, so a correctly loaded program asked to be
-    reloaded on every single run - which teaches people to ignore the message
-    that matters. The program now holds one Ver$ and sends it in both lines,
-    and this function is the only place the laptop names a version."""
+    The version is read out of whatever line the program sent, never written
+    down a second time here: in SINADCTL 2.0-2.2 the PING case carried its own
+    "1.9" while READY carried the real version, so a correctly loaded program
+    asked to be reloaded on every run - a warning worse than none, because it
+    trains the reader to ignore the real one. The program now holds one Ver$
+    and sends it in both lines, and this is the only place on this side that
+    names a version."""
     m = re.search(r"SINADCTL\s+([0-9]+(?:\.[0-9]+)*)", reply)
     if not m:
         return None
