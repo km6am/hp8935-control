@@ -14,8 +14,8 @@ read all of it in a sitting, and that another implementer can see the protocol
 working in the smallest honest amount of code.
 
 ```
-~/miniconda3/envs/vnafit/bin/python load.py --sim
-~/miniconda3/envs/vnafit/bin/python sinad.py measure --sim
+python3 load.py --sim
+python3 sinad.py measure --sim
 ```
 
 Those two work with no instrument attached and are the fastest way to see what
@@ -57,7 +57,7 @@ output is **DUPLEX OUT**; the radio's earphone jack goes to **AUDIO IN**.
 ### 2. Load the program
 
 ```
-~/miniconda3/envs/vnafit/bin/python load.py
+python3 load.py
 ```
 
 About a minute and a half. It types a 31-line receiver program onto the
@@ -71,7 +71,7 @@ command bar, runs it, streams `SINADCTL.BAS` in at full rate, stores it in the
 ### 3. Every session after that
 
 ```
-~/miniconda3/envs/vnafit/bin/python load.py --start
+python3 load.py --start
 ```
 
 A few seconds instead of a minute and a half: the stored copy survives a power
@@ -82,8 +82,8 @@ when it has.
 ### 4. Measure
 
 ```
-~/miniconda3/envs/vnafit/bin/python sinad.py ping
-~/miniconda3/envs/vnafit/bin/python sinad.py measure --freq 145.55 --dev 3
+python3 sinad.py ping
+python3 sinad.py measure --freq 145.55 --dev 3
 ```
 
 `measure` runs a FAST sweep and prints each point as it arrives — endpoints,
@@ -101,7 +101,7 @@ Nothing is written to disk. If you want the points, redirect stdout.
 ### 5. When something is wrong
 
 ```
-~/miniconda3/envs/vnafit/bin/python sinad.py term
+python3 sinad.py term
 ```
 
 Type any SINADCTL command and watch the replies, including the ones
@@ -198,7 +198,7 @@ something is learned on the bench it lands there first. This fork is expected
 to lag, and `check_minimal.py` says what must not be allowed to lag:
 
 ```
-~/miniconda3/envs/vnafit/bin/python check_minimal.py
+python3 check_minimal.py
 ```
 
 | Check | Why |

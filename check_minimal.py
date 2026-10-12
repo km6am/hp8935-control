@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Checks for the minimal fork. Run it after touching anything in here.
 
-  ~/miniconda3/envs/vnafit/bin/python check_minimal.py
+  python3 check_minimal.py
 
 Four checks, in the order they would catch a problem:
 
